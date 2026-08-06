@@ -1,0 +1,19 @@
+# /etc/systemd/system/atsys_collector.service
+
+[Unit]
+Description=Metrics collector for ClickHouse
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/atsys_collector
+EnvironmentFile=/opt/atsys_collector/.env
+ExecStart=/opt/atsys_collector/collector
+Restart=on-failure
+RestartSec=5
+User=metrics
+Group=metrics
+
+[Install]
+WantedBy=multi-user.target
