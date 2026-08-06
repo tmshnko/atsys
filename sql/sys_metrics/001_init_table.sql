@@ -1,4 +1,4 @@
-CREATE TABLE default.sys_metrics 
+CREATE TABLE system_stats.sys_metrics 
 (
     `time` DateTime CODEC(DoubleDelta), 
     `host` LowCardinality(String), 
