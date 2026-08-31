@@ -18,6 +18,13 @@ services:
         soft: 262144
         hard: 262144
     restart: unless-stopped
+  networks:
+    - default
+    - atsys_net
+
+networks:
+  atsys_net:
+    external: true
 
 volumes:
   ch_data:
