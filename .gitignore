@@ -5,3 +5,5 @@
 /bin/
 
 .vscode/
+
+sql/sys_metrics/002_add_grafana_user.sql
