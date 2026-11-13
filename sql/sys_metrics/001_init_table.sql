@@ -1,4 +1,6 @@
-CREATE TABLE system_stats.sys_metrics 
+CREATE DATABASE IF NOT EXISTS system_stats;
+
+CREATE TABLE IF NOT EXISTS system_stats.sys_metrics 
 (
     `time` DateTime CODEC(DoubleDelta), 
     `host` LowCardinality(String), 

@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    orgId: 1
+  
+    jsonData:
+      host: clickhouse
+      port: ${CH_PORT}
+      protocol: native
+      secure: false 
+      username: $GRAFANA_CH_USER
+      defaultDatabase: $DB_NAME
+      tlsSkipVerify: false 
+      
+    secureJsonData:
+      password: $GRAFANA_CH_PASSWORD
