@@ -126,9 +126,12 @@ func fillCPUTicks(t []string) (ticksCPU, error) {
 }
 
 func getCPUUsage(prev uint64, curr uint64, prevTotal uint64, currTotal uint64) float32 {
-	diffTotal := float32(currTotal) - float32(prevTotal)
-	diff := float32(curr) - float32(prev)
-	return 100*(diff/diffTotal)
+	if currTotal <= prevTotal || curr < prev {
+        return 0
+    }
+	diffTotal := currTotal - prevTotal
+    diff := curr - prev
+	return float32(100 * float64(diff) / float64(diffTotal))
 }
 
 var prevTicks ticksCPU
