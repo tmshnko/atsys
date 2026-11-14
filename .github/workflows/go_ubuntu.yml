@@ -1,0 +1,161 @@
+
+name: Test and Release Collector for Ubuntu
+
+on:
+  push:
+    branches: [main]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Find differences with last Ubuntu release
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.checker.outputs.changed }}
+      version: ${{ steps.checker.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changes
+        id: checker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+
+          latest=$(
+            git tag --list 'ubuntu-v*' \
+              | grep -E '^ubuntu-v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n 1 || true
+          )
+
+          if [[ -z "$latest" ]]; then
+            echo "First Ubuntu release"
+            changed=true
+            version="ubuntu-v1.0.0"
+          else
+            echo "Last release: $latest"
+
+            set +e
+            git diff --quiet "$latest" HEAD -- \
+              cmd/collector/ go.mod go.sum internal/ pkg/
+            status=$?
+            set -e
+
+            case "$status" in
+              0)
+                changed=false
+                version=""
+                ;;
+              1)
+                changed=true
+                number="${latest#ubuntu-v}"
+                IFS=. read -r major minor patch <<< "$number"
+                version="ubuntu-v${major}.${minor}.$((patch + 1))"
+                ;;
+              *)
+                echo "git diff failed: $status" >&2
+                exit "$status"
+                ;;
+            esac
+          fi
+
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          echo "Changed: $changed"
+          echo "Version: $version"
+
+  test:
+    name: Test Collector on Ubuntu
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.changed == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Static analysis
+        run: go vet ./...
+
+  build:
+    name: Build Collector for Ubuntu
+    runs-on: ubuntu-latest
+    needs: [changes, test]
+    if: needs.changes.outputs.changed == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build collector
+        shell: bash
+        run: |
+          mkdir -p release
+
+          go build \
+            -trimpath \
+            -o release/collector-ubuntu \
+            ./cmd/collector
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-ubuntu
+          path: release/collector-ubuntu
+          if-no-files-found: error
+
+  release:
+    name: Publish Ubuntu Release
+    runs-on: ubuntu-latest
+    needs: [changes, test, build]
+    if: needs.changes.outputs.changed == 'true'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: collector-ubuntu
+          path: release
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release
+          sha256sum collector-ubuntu > checksums_ubuntu.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.changes.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          gh release create "$VERSION" release/* \
+            --target "$COMMIT_SHA" \
+            --title "$VERSION" \
+            --generate-notes

@@ -1,0 +1,161 @@
+
+name: Test and Release Collector for Arch
+
+on:
+  push:
+    branches: [main]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Find differences with last Arch release
+    runs-on: [self-hosted, Linux, X64, arch]
+    outputs:
+      changed: ${{ steps.checker.outputs.changed }}
+      version: ${{ steps.checker.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changes
+        id: checker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+
+          latest=$(
+            git tag --list 'arch-v*' \
+              | grep -E '^arch-v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n 1 || true
+          )
+
+          if [[ -z "$latest" ]]; then
+            echo "First Arch release"
+            changed=true
+            version="arch-v1.0.0"
+          else
+            echo "Last release: $latest"
+
+            set +e
+            git diff --quiet "$latest" HEAD -- \
+              cmd/collector/ go.mod go.sum internal/ pkg/
+            status=$?
+            set -e
+
+            case "$status" in
+              0)
+                changed=false
+                version=""
+                ;;
+              1)
+                changed=true
+                number="${latest#arch-v}"
+                IFS=. read -r major minor patch <<< "$number"
+                version="arch-v${major}.${minor}.$((patch + 1))"
+                ;;
+              *)
+                echo "git diff failed: $status" >&2
+                exit "$status"
+                ;;
+            esac
+          fi
+
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          echo "Changed: $changed"
+          echo "Version: $version"
+
+  test:
+    name: Test Collector on Arch
+    runs-on: [self-hosted, Linux, X64, arch]
+    needs: changes
+    if: needs.changes.outputs.changed == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Static analysis
+        run: go vet ./...
+
+  build:
+    name: Build Collector for Arch
+    runs-on: [self-hosted, Linux, X64, arch]
+    needs: [changes, test]
+    if: needs.changes.outputs.changed == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build collector
+        shell: bash
+        run: |
+          mkdir -p release
+
+          go build \
+            -trimpath \
+            -o release/collector-arch \
+            ./cmd/collector
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-arch
+          path: release/collector-arch
+          if-no-files-found: error
+
+  release:
+    name: Publish Arch Release
+    runs-on: [self-hosted, Linux, X64, arch]
+    needs: [changes, test, build]
+    if: needs.changes.outputs.changed == 'true'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: collector-arch
+          path: release
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release
+          sha256sum collector-arch > checksums_arch.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.changes.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          gh release create "$VERSION" release/* \
+            --target "$COMMIT_SHA" \
+            --title "$VERSION" \
+            --generate-notes
