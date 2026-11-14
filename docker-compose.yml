@@ -39,7 +39,7 @@ services:
       - atsys_net
     depends_on:
       clickhouse:
-        condition: healthy
+        condition: service_healthy
 
   grafana:
     container_name: grafana
@@ -56,7 +56,9 @@ services:
       DB_NAME: ${DB_NAME}
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana_config.yml:/etc/grafana/provisioning/datasources/clickhouse.yml
+      - ./grafana/grafana_config.yml:/etc/grafana/provisioning/datasources/clickhouse.yml:ro
+      - ./grafana/grafana_dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./grafana/system_metrics.json:/var/lib/grafana/dashboards/system_metrics.json:ro
     networks:
       - atsys_net
     depends_on:
